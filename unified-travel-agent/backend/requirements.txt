@@ -1,0 +1,51 @@
+# After installing this file, also run once:
+#   python -m spacy download en_core_web_lg
+# (Presidio's PII analyzer needs this spaCy model; it isn't a normal
+# pip-installable-by-name package, so it can't be pinned as a plain line here.)
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.14.2
+backoff==2.2.1
+bcrypt==5.0.0
+certifi==2026.7.22
+charset-normalizer==3.5.1
+click==8.4.2
+colorama==0.4.6
+fastapi==0.141.1
+googleapis-common-protos==1.75.1
+h11==0.16.0
+httpcore==1.0.9
+httpcore2==2.12.0
+httpx==0.28.1
+httpx2==2.12.0
+idna==3.19
+jiter==0.16.0
+langfuse==4.14.4
+openai==2.54.0
+opentelemetry-api==1.42.1
+opentelemetry-exporter-otlp-proto-common==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-proto==1.44.0
+opentelemetry-sdk==1.42.1
+opentelemetry-semantic-conventions==0.63b1
+packaging==26.3
+presidio-analyzer==2.2.364
+presidio-anonymizer==2.2.364
+protobuf==7.36.0
+psycopg==3.3.4
+psycopg-binary==3.3.4
+pydantic==2.13.4
+pydantic_core==2.46.4
+PyJWT==2.13.0
+python-dotenv==1.2.3
+requests==2.34.2
+sniffio==1.3.1
+spacy==3.8.16
+starlette==1.6.0
+truststore==0.10.4
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+tzdata==2026.3
+urllib3==2.7.0
+uvicorn==0.52.4
+wrapt==2.3.0
