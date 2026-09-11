@@ -1,8 +1,0 @@
-# Powers backend/adk_app/ - the real ADK orchestrator wired into main.py's
-# /api/chat. Installs a large transitive dependency tree (google-genai,
-# litellm, boto3, sqlalchemy, tiktoken, ...) and forced a downgrade of
-# openai/opentelemetry when added to the main venv - see requirements.txt's
-# pinned versions, which already reflect that downgrade. A separate venv
-# would avoid the conflict if this becomes a long-term concern.
-google-adk[db]
-litellm
