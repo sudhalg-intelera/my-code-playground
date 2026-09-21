@@ -13,3 +13,9 @@ __pycache__/
 .fastembed_cache/
 *.onnx
 *.log
+
+.claude/
+.vscode/
+*.log
+.fastembed_cache/
+*.onnx
