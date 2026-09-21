@@ -1,0 +1,66 @@
+:root {
+  --ink: #171b2e;
+  --ink-muted: #5c6478;
+  --bg-shell: #12162a;
+  --surface: #ffffff;
+  --surface-muted: #eef1f6;
+  --border: #dee3ec;
+  --accent: #e8672b;
+  --accent-ink: #ffffff;
+  --accent-soft: #fde9dd;
+  --user-bubble: #1b2340;
+
+  --display: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sans: "Work Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+  font: 16px/1.5 var(--sans);
+  color-scheme: dark;
+  color: var(--ink);
+  background: var(--bg-shell);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--bg-shell);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--ink);
+  text-align: left;
+}
+
+/* Chrome's autofill styling repaints an input's text a washed-out gray and
+   can show a stale suggestion over what's actually been typed - this forces
+   it back to the real text color/background so typed text is never mistaken
+   for an unfilled placeholder. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink);
+  -webkit-box-shadow: 0 0 0px 1000px #fbfbfc inset;
+  box-shadow: 0 0 0px 1000px #fbfbfc inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-muted);
+  color: var(--ink);
+}

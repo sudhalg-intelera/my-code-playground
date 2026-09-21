@@ -1,0 +1,103 @@
+# =============================================================================
+# Dialog flows for the Unified Travel Agent's NeMo Guardrails layer.
+#
+# WHAT THIS FILE ACTUALLY DOES
+# Colang flows here are deterministic, canonical-form-matched canned replies
+# - not an LLM self-check, and not real request handling. NeMo's dialog
+# rails embed the incoming message (FastEmbed), classify it against the
+# "define user ..." examples below, and if it confidently matches, return
+# the paired "define bot ..." line verbatim, skipping the LLM entirely.
+# That only works for replies that don't need any real data - which is why
+# only TWO flows exist below. Everything else a user can ask this app
+# (search/book a flight or hotel, cancel a booking, look up past bookings,
+# plan an itinerary, ask about a destination) requires an actual database
+# lookup or tool call, which a static Colang bot line cannot do - it would
+# return a fixed, ungrounded answer instead of the real result. Those
+# requests are intentionally NOT modeled as Colang flows; they fall through
+# untouched to the ADK agent pipeline described below.
+#
+# THE APP'S ACTUAL PROCESSES - WHICH AGENT DOES WHAT
+# (Reference only - not executable Colang. Source of truth is
+# adk_app/agents/root_agent.py; keep this in sync by hand if that changes.)
+#
+#   root_orchestrator (adk_app/agents/root_agent.py)
+#     Never answers directly - reads the message and delegates to exactly
+#     one of the four sub-agents below.
+#
+#     -> booking_agent (adk_app/agents/booking_agent.py)
+#          Reacts to: searching, recommending, or booking a specific flight
+#          or hotel; canceling a booking; "what have I booked" / "where have
+#          I been" style questions about the user's own travel history; a
+#          bare confirmation like "book it" once a search result is pending.
+#          Tools: flights_tool, hotels_tool, booking_tool (confirm/cancel/
+#          get_my_bookings) - the only agent that can read/write real
+#          bookings or look up flight/hotel inventory.
+#
+#     -> itinerary_agent (adk_app/agents/itinerary_agent.py)
+#          Reacts to: an explicit multi-day plan/itinerary request
+#          ("plan my trip", "3 day itinerary"). Not a single hotel/flight
+#          ask, even if it sounds like trip planning - that's booking_agent.
+#          Tools: itinerary_tool.
+#
+#     -> destination_agent (adk_app/agents/destination_agent.py)
+#          Reacts to: sights, food, culture questions about a place. No
+#          hotel/flight capability.
+#          Tools: destinations_tool.
+#
+#     -> travel_agent (adk_app/agents/travel_agent.py)
+#          Reacts to: general travel inspiration/questions with no
+#          reference to the user's own past activity and no specific
+#          flight/hotel ask.
+#
+#   Every one of those requests still passes through this same guardrails
+#   layer first (self_check_input below), and the agent's reply through
+#   self_check_output, before reaching the user - Colang flows or not.
+# =============================================================================
+
+# --- Flow: greeting -----------------------------------------------------
+# Real conversation history for this app shows a large share of sessions
+# start with nothing but "Hello" - answering those with a fixed, on-brand
+# line instead of a full LLM round trip through the orchestrator is both
+# faster and more consistent than letting the model freestyle a greeting.
+# Additive: only fires for a bare greeting with no other content. Anything
+# else - "hello, book me a flight to Rome" - falls through to the ADK
+# agents as normal.
+
+define user express greeting
+  "hi"
+  "hello"
+  "hey"
+  "hello there"
+  "hey there"
+  "good morning"
+  "good afternoon"
+  "good evening"
+
+define flow greeting
+  user express greeting
+  bot express greeting
+
+define bot express greeting
+  "Hello! I'm your Unified Travel Agent - I can help you search flights and hotels, plan an itinerary, or tell you about a destination. Where would you like to go?"
+
+# --- Flow: capabilities --------------------------------------------------
+# Same rationale as greeting, for "what can you do" / "help" style
+# questions. The reply below must stay in sync with the agent map above -
+# it's stating the same routing, just phrased for the user. Kept in sync by
+# hand with _CAPABILITIES_PHRASES / CAPABILITIES_BOT_MESSAGE in
+# guardrails/client.py - nothing enforces that automatically.
+
+define user ask capabilities
+  "what can you do"
+  "help"
+  "what can you help with"
+  "what are your capabilities"
+  "how can you help me"
+  "what do you do"
+
+define flow capabilities
+  user ask capabilities
+  bot express capabilities
+
+define bot express capabilities
+  "I'm your Unified Travel Agent. I can: search and book flights and hotels (and cancel or look up your past bookings), plan a multi-day itinerary, tell you about a destination's sights, food, and culture, or just talk through general travel ideas. What would you like to do?"
