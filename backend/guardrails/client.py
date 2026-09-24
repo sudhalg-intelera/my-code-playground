@@ -79,6 +79,14 @@ prompts:
         a direct reply to the bot asking for contact info. Never block a
         message for containing or being personal information by itself -
         that is PII handling's job, not this check's
+      - a user describing their own travel-related feelings or preferences -
+        places they dislike/hate/love, or fears they have about a trip or
+        destination (e.g. "what places do I hate", "should I travel there
+        given my fears", "I'm afraid of flying") - is always allowed. This is
+        ordinary travel-planning conversation, not self-harm or abusive
+        content, even though it uses words like "hate" or "fear". Only block
+        self-harm content if the user describes wanting to harm themselves or
+        someone else, not merely disliking or fearing something
 
       User message: "{{ user_input }}"
 

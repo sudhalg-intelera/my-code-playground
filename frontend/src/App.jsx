@@ -57,6 +57,12 @@ export default function App() {
   const [memories, setMemories] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  // What real PII (email/phone/etc.) this session's redaction tokens stand
+  // for - fetched on demand from /api/pii/token-map, not kept refreshed
+  // automatically, so it's always re-fetched when opened.
+  const [tokenMap, setTokenMap] = useState(null);
+  const [tokenMapOpen, setTokenMapOpen] = useState(false);
+
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -97,6 +103,31 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth]);
+
+  // A different session's token map shouldn't linger on screen once the
+  // conversation switches - close the panel and drop the stale data.
+  useEffect(() => {
+    setTokenMap(null);
+    setTokenMapOpen(false);
+  }, [sessionId]);
+
+  const toggleTokenMap = async () => {
+    if (tokenMapOpen) {
+      setTokenMapOpen(false);
+      return;
+    }
+    try {
+      const res = await authedFetch(`/api/pii/token-map/${sessionId}`);
+      if (res.status === 401) {
+        logout();
+        return;
+      }
+      setTokenMap(res.ok ? await res.json() : {});
+    } catch {
+      setTokenMap({});
+    }
+    setTokenMapOpen(true);
+  };
 
   const handleAuthenticated = (nextAuth) => {
     setAuth(nextAuth);
@@ -288,13 +319,41 @@ export default function App() {
             </div>
 
             <div style={styles.sidebarFooter}>
-              <div style={styles.accountLine}>
-                {auth.username} · {auth.role}
+              <div style={{ minWidth: 0 }}>
+                <div style={styles.accountLine}>
+                  {auth.username} · {auth.role}
+                </div>
+                <div
+                  style={styles.sessionIdLine}
+                  title={`Session ID: ${sessionId} (click to copy)`}
+                  onClick={() => navigator.clipboard?.writeText(sessionId)}
+                >
+                  Session: {sessionId.slice(0, 8)}…
+                </div>
               </div>
               <button type="button" onClick={logout} style={styles.pillButtonQuiet}>
                 Log Out
               </button>
             </div>
+
+            <button type="button" onClick={toggleTokenMap} style={styles.tokenMapToggle}>
+              {tokenMapOpen ? "Hide redacted PII ▲" : "View redacted PII ▼"}
+            </button>
+            {tokenMapOpen && (
+              <div style={styles.tokenMapPanel}>
+                {tokenMap && Object.keys(tokenMap).length ? (
+                  Object.entries(tokenMap).map(([token, value]) => (
+                    <div key={token} style={styles.tokenMapRow}>
+                      <span style={styles.tokenMapToken}>{token}</span>
+                      <span>→</span>
+                      <span style={styles.tokenMapValue}>{value}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div style={styles.tokenMapEmpty}>No PII redacted in this session yet.</div>
+                )}
+              </div>
+            )}
           </aside>
         )}
 
@@ -534,6 +593,57 @@ const styles = {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap"
+  },
+  sessionIdLine: {
+    fontFamily: "monospace",
+    fontSize: "11px",
+    color: "#7a82a6",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+    marginTop: "2px"
+  },
+  tokenMapToggle: {
+    marginTop: "10px",
+    width: "100%",
+    background: "none",
+    border: "1px solid #2a325a",
+    borderRadius: "6px",
+    color: "#c3c8dc",
+    fontFamily: "'Work Sans', sans-serif",
+    fontSize: "11px",
+    padding: "6px 8px",
+    cursor: "pointer",
+    textAlign: "left"
+  },
+  tokenMapPanel: {
+    marginTop: "8px",
+    maxHeight: "160px",
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px"
+  },
+  tokenMapRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    fontFamily: "monospace",
+    fontSize: "10px",
+    color: "#c3c8dc",
+    overflowWrap: "anywhere"
+  },
+  tokenMapToken: {
+    color: "#e4986b"
+  },
+  tokenMapValue: {
+    color: "#8fd19e"
+  },
+  tokenMapEmpty: {
+    fontFamily: "'Work Sans', sans-serif",
+    fontSize: "11px",
+    color: "#7a82a6"
   },
   mainColumn: {
     flex: 1,

@@ -8,7 +8,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 langfuse = Langfuse(
     public_key=os.getenv("LANGFUSE_PUBLIC_KEY", "pk-dummy"),
     secret_key=os.getenv("LANGFUSE_SECRET_KEY", "sk-dummy"),
-    host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+    base_url=os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
 )
 
 def get_compiled_prompt(prompt_name: str, **kwargs) -> str:

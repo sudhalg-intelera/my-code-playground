@@ -19,5 +19,20 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: travel_agent_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - travel_agent_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   travel_agent_pgdata:
+  travel_agent_redisdata:

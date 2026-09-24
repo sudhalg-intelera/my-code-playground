@@ -15,7 +15,7 @@ from langfuse import propagate_attributes
 from observability.langfuse_config import langfuse
 from logging_config import get_logger
 from memory import update_session_summary
-from pii import sanitize_user_input
+from pii import deredact_for_session, get_session_token_map, sanitize_user_input
 
 logger = get_logger("main")
 
@@ -154,6 +154,30 @@ def get_memory(claims: dict = Depends(get_current_user)) -> list[dict]:
     return rows
 
 
+@app.get("/api/pii/token-map/{session_id}")
+def get_token_map(session_id: str, claims: dict = Depends(get_current_user)) -> dict:
+    """
+    Visibility into what real PII a session's redaction tokens actually
+    stand for (stored in Redis - see pii/guard.py) - lets the frontend show
+    this directly instead of needing view-token-map.ps1/redis-cli. Scoped to
+    the caller's own session, same ownership check as
+    /api/conversations/{session_id} - this is real PII, not something to
+    hand back for an arbitrary session_id.
+    """
+    user_id = claims["sub"]
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM sessions WHERE session_id = %s", (session_id,))
+            session_row = cur.fetchone()
+            if not session_row or str(session_row["user_id"]) != user_id:
+                raise HTTPException(status_code=404, detail="session not found")
+    finally:
+        conn.close()
+
+    return get_session_token_map(session_id)
+
+
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest, claims: dict = Depends(get_current_user)) -> dict:
     # Trust the bearer token's subject over the client-supplied user_id field.
@@ -191,8 +215,10 @@ async def chat_endpoint(request: ChatRequest, claims: dict = Depends(get_current
     # travel messages pay no extra latency from this check.
     flow_reply, flow_name = await check_bare_flow(clean_message)
     if flow_reply is not None:
+        deredacted_reply = deredact_for_session(flow_reply, session_id, user_id=user_id)
         total_ms = (time.time() - round_trip_start) * 1000
         _log_chat_turn(session_id, user_id, clean_message, flow_reply, pii_result["pii_detected"], False)
+        _log_pii_trace(trace_id, user_id, session_id, request.message, clean_message, flow_reply, deredacted_reply)
         logger.info(
             "Chat turn complete user=%s session=%s pii_flagged=%s guardrail_blocked=False "
             "total_duration_ms=%.1f colang_flow=%s",
@@ -201,7 +227,7 @@ async def chat_endpoint(request: ChatRequest, claims: dict = Depends(get_current
         return {
             "user_id": user_id,
             "session_id": session_id,
-            "response": flow_reply,
+            "response": deredacted_reply,
             "agent_name": flow_name.capitalize(),
             "pii_flagged": pii_result["pii_detected"],
             "guardrail_blocked": False,
@@ -353,6 +379,14 @@ async def chat_endpoint(request: ChatRequest, claims: dict = Depends(get_current
             pii_result["pii_detected"], guardrail_blocked,
         )
 
+        # Restores real values (e.g. the user's own email in a booking
+        # confirmation) ONLY in what's about to be returned over HTTP -
+        # chat_messages above and the Langfuse trace below both already
+        # captured agent_response in its still-redacted form, which is what
+        # the PII design requires them to store.
+        deredacted_response = deredact_for_session(agent_response, session_id, user_id=user_id)
+        _log_pii_trace(trace_id, user_id, session_id, request.message, clean_message, agent_response, deredacted_response)
+
         total_ms = (time.time() - round_trip_start) * 1000
 
         if root_span:
@@ -390,11 +424,43 @@ async def chat_endpoint(request: ChatRequest, claims: dict = Depends(get_current
     return {
         "user_id": user_id,
         "session_id": session_id,
-        "response": agent_response,
+        "response": deredacted_response,
         "agent_name": agent_name,
         "pii_flagged": pii_result["pii_detected"],
         "guardrail_blocked": guardrail_blocked
     }
+
+
+def _log_pii_trace(
+    trace_id: str, user_id: str, session_id: str,
+    raw_input: str, redacted_input: str, redacted_output: str, deredacted_output: str,
+) -> None:
+    """
+    Logs the full PII redaction lifecycle for one message to app.log, in
+    order, every line tagged with the same trace_id - so grepping that one
+    ID (e.g. copied from this turn's Langfuse trace) surfaces exactly these
+    four lines together instead of them being interleaved with every other
+    concurrent turn's logging. Plain-text log lines can't render bold, so
+    RAW_INPUT (like the other three tags) relies on its all-caps name for
+    visual scanning rather than actual formatting.
+
+    Runs on every turn, not just ones with PII - deredact_text/
+    deredact_for_session are no-ops when there's nothing to restore, so
+    redacted_output and deredacted_output are identical in that case.
+    """
+    logger.info("RAW_INPUT trace_id=%s user_id=%s session_id=%s text=%r", trace_id, user_id, session_id, raw_input)
+    logger.info(
+        "REDACTED_INPUT trace_id=%s user_id=%s session_id=%s text=%r",
+        trace_id, user_id, session_id, redacted_input,
+    )
+    logger.info(
+        "LLM_REDACTED_OUTPUT trace_id=%s user_id=%s session_id=%s text=%r",
+        trace_id, user_id, session_id, redacted_output,
+    )
+    logger.info(
+        "DEREDACTED_OUTPUT_SHOWN_TO_USER trace_id=%s user_id=%s session_id=%s text=%r",
+        trace_id, user_id, session_id, deredacted_output,
+    )
 
 
 def _log_chat_turn(session_id, user_id, user_text, agent_text, pii_flagged, guardrail_blocked) -> None:

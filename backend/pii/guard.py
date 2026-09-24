@@ -1,5 +1,7 @@
+import os
 from collections import Counter
 
+import redis
 from presidio_analyzer import AnalyzerEngine
 
 from observability.audit import write_audit_log
@@ -23,13 +25,49 @@ ENTITIES_TO_REDACT = {
 }
 MIN_CONFIDENCE = 0.5
 
-# Accumulates every token->original mapping seen across a session's turns
-# (in-memory, process-lifetime only - same demo-scale caveat as elsewhere).
+# Accumulates every token->original mapping seen across a session's turns.
 # Needed because the ADK orchestrator's own memory can carry a redacted
 # token forward into a LATER turn (e.g. a booking confirmed several turns
 # after the email was mentioned), by which point that turn's own
 # redaction_map from sanitize_user_input() no longer has the token.
+#
+# Stored in Redis (see docker-compose.yml's `redis` service) - one hash per
+# session_id, field=token, value=original PII - so the map survives a
+# backend restart instead of living only in this process's memory. Falls
+# back to the in-memory dict below (process-lifetime only, same demo-scale
+# caveat this used to carry unconditionally) if Redis is unreachable, so a
+# dev machine that hasn't started the container yet doesn't lose PII
+# redaction entirely - it just loses persistence across restarts.
+_REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+_redis_client = redis.Redis.from_url(_REDIS_URL, decode_responses=True)
 _session_redaction_maps: dict[str, dict] = {}
+
+
+def _redis_key(session_id: str) -> str:
+    return f"pii_token_map:{session_id}"
+
+
+def _get_session_map(session_id: str) -> dict:
+    try:
+        return _redis_client.hgetall(_redis_key(session_id))
+    except Exception:
+        logger.exception(
+            "Redis unavailable reading token map for session %s - falling back to in-memory copy", session_id,
+        )
+        return _session_redaction_maps.get(session_id, {})
+
+
+def _save_session_map(session_id: str, redaction_map: dict) -> None:
+    # Mirrored into the in-memory dict unconditionally so a later Redis
+    # outage this same process-lifetime still has this turn's tokens to
+    # fall back on, even though a fresh process after a restart would not.
+    _session_redaction_maps.setdefault(session_id, {}).update(redaction_map)
+    try:
+        _redis_client.hset(_redis_key(session_id), mapping=redaction_map)
+    except Exception:
+        logger.exception(
+            "Redis unavailable saving token map for session %s - kept in-memory only this turn", session_id,
+        )
 
 
 def _resolve_overlaps(results):
@@ -49,10 +87,13 @@ def sanitize_user_input(text: str, user_id: str | None = None, session_id: str |
     Each redacted span becomes a unique token (e.g. [PERSON_REDACTED_1])
     mapped back to its original value in redaction_map, so a downstream
     tool/DB write that legitimately needs the real value can call
-    deredact_text() and still execute seamlessly - only the LLM, Langfuse
-    trace, and chat_messages log ever see the redacted form.
+    deredact_text() and still execute seamlessly - the LLM, Langfuse trace,
+    and chat_messages log only ever see the redacted form. main.py
+    de-redacts the final reply back to real values (e.g. the user's own
+    email echoed back in a booking confirmation) only in the HTTP response
+    actually shown to that same user - never in what gets traced or stored.
     """
-    session_map = _session_redaction_maps.setdefault(session_id, {}) if session_id else {}
+    session_map = _get_session_map(session_id) if session_id else {}
 
     try:
         raw_results = _analyzer.analyze(text=text, language="en", entities=list(ENTITIES_TO_REDACT))
@@ -113,7 +154,8 @@ def sanitize_user_input(text: str, user_id: str | None = None, session_id: str |
         detected_types, redaction_map, new_tokens, sanitized_text = [], {}, 0, text
 
     if redaction_map:
-        session_map.update(redaction_map)
+        if session_id:
+            _save_session_map(session_id, redaction_map)
         unique_types = sorted(set(detected_types))
         logger.info(
             "PII_REDACTED user_id=%s types=%s occurrences=%d new_tokens=%d",
@@ -143,11 +185,20 @@ def deredact_text(text: str, redaction_map: dict | None, user_id: str | None = N
         return text
 
     restored = text
+    replaced = 0
     for token, original in redaction_map.items():
-        restored = restored.replace(token, original)
+        if token in restored:
+            restored = restored.replace(token, original)
+            replaced += 1
 
-    logger.info("PII_DEREDACTED user_id=%s count=%d", user_id, len(redaction_map))
-    write_audit_log(user_id, "pii_deredacted", {"count": len(redaction_map)})
+    # Only log/audit an actual substitution - this now runs on every turn's
+    # final response (see main.py), where most calls have a non-empty
+    # session-wide redaction_map available but no token actually present in
+    # THIS particular text, which would otherwise spam PII_DEREDACTED with a
+    # count of tokens merely available, not tokens actually restored.
+    if replaced:
+        logger.info("PII_DEREDACTED user_id=%s count=%d", user_id, replaced)
+        write_audit_log(user_id, "pii_deredacted", {"count": replaced})
     return restored
 
 
@@ -160,4 +211,15 @@ def deredact_for_session(text: str, session_id: str | None, user_id: str | None 
     """
     if not session_id:
         return text
-    return deredact_text(text, _session_redaction_maps.get(session_id), user_id=user_id)
+    return deredact_text(text, _get_session_map(session_id), user_id=user_id)
+
+
+def get_session_token_map(session_id: str) -> dict:
+    """
+    Public read of this session's token -> real value map (the same data
+    view-token-map.ps1 reads via redis-cli) - for a caller that wants to
+    show it directly rather than shelling out. Callers are responsible for
+    authorizing the request; this returns whatever Redis has for the given
+    session_id with no ownership check of its own.
+    """
+    return _get_session_map(session_id)
